@@ -110,9 +110,8 @@
 </div>
 
 <script>
-    // Configuración del servidor en la nube (Público temporal)
     const BIN_URL = "https://api.jsonbin.io/v3/b/6658a5daacd3cb34a8b0cc02";
-    const API_KEY = "$2a$10$W23bLgX3bM4fVbY8Z7K2O.6yE8F8M3vMh3Y5z1v2v4v4v4v4v4v4v"; // Llave pública restringida para el juego
+    const API_KEY = "$2a$10$W23bLgX3bM4fVbY8Z7K2O.6yE8F8M3vMh3Y5z1v2v4v4v4v4v4v4v";
 
     const palabras = ["Manzana", "Televisor", "Coche", "Estuche", "Fútbol", "Perro", "Playa", "Pizza", "Minecraft", "Impresora 3D"];
     let currentUser = "";
@@ -155,7 +154,13 @@
         let state = await getGameState();
         if (!state) return alert("Error de conexión con el servidor.");
 
-        if (state.status === 'playing') {
+        // Si el admin no se ha reportado en más de 6 segundos, limpiamos la sala antes de entrar
+        const ahora = Date.now();
+        if (state.admin_heartbeat && (ahora - state.admin_heartbeat > 6000)) {
+            state = { players: [], status: "lobby", impostor: "", palabra: "", admin_heartbeat: 0 };
+        }
+
+        if (state.status === 'playing' && !state.players.includes(currentUser)) {
             return alert("Hay una partida en curso. Espera a que termine.");
         }
 
@@ -165,6 +170,9 @@
 
         if (!state.players.includes(currentUser)) {
             state.players.push(currentUser);
+            if (currentUser.toLowerCase() === 'angel') {
+                state.admin_heartbeat = Date.now();
+            }
             await updateGameState(state);
         }
 
@@ -175,6 +183,21 @@
 
     function processState(state) {
         if (!state || localStatus === "login") return;
+
+        // EXPULSIÓN SI EL ADMIN DESAPARECE
+        const ahora = Date.now();
+        const adminEnLista = state.players.some(p => p.toLowerCase() === 'angel');
+        
+        // Si no hay admin registrado, o si el admin lleva más de 6 segundos sin dar señales...
+        if (!adminEnLista || (state.admin_heartbeat && (ahora - state.admin_heartbeat > 6000))) {
+            if (currentUser.toLowerCase() !== 'angel') {
+                alert("El administrador ha salido de la sala. Volviendo al inicio.");
+                localStatus = "login";
+                currentUser = "";
+                showScreen('screen-login');
+                return;
+            }
+        }
 
         if (state.status === 'lobby') {
             if (document.getElementById('screen-game').classList.contains('active')) {
@@ -219,7 +242,7 @@
                 display.innerHTML = `
                     <div class="role-box civil">ERES CIVIL 👥</div>
                     <p>Tu palabra secreta es: <strong style="font-size: 20px; color: #4cd137;">${state.palabra}</strong></p>
-                </br><p>¡Describe tu palabra sin decirla directamente para pillar al impostor!</p>
+                    </br><p>¡Describe tu palabra sin decirla directamente para pillar al impostor!</p>
                 `;
             }
 
@@ -239,6 +262,7 @@
         const randomIndex = Math.floor(Math.random() * 3);
         state.impostor = state.players[randomIndex];
         state.palabra = palabras[Math.floor(Math.random() * palabras.length)];
+        if (currentUser.toLowerCase() === 'angel') state.admin_heartbeat = Date.now();
 
         await updateGameState(state);
     }
@@ -248,7 +272,8 @@
             players: [],
             status: "lobby",
             impostor: "",
-            palabra: ""
+            palabra: "",
+            admin_heartbeat: 0
         };
         await updateGameState(state);
     }
@@ -258,10 +283,18 @@
         document.getElementById(screenId).classList.add('active');
     }
 
-    // Sincronización en la nube cada 2 segundos
+    // Bucle principal de sincronización (Cada 2 segundos)
     setInterval(async () => {
         if (localStatus === "login") return;
+        
         let state = await getGameState();
+        
+        // Si yo soy el Admin, actualizo mi "latido" antes de mandar los datos
+        if (currentUser.toLowerCase() === 'angel' && state) {
+            state.admin_heartbeat = Date.now();
+            await updateGameState(state);
+        }
+        
         processState(state);
     }, 2000);
 </script>
