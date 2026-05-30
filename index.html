@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Juego del Impostor P2P</title>
+    <title>Juego del Impostor P2P Estable</title>
     <style>
         body {
             font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
@@ -106,13 +106,13 @@
     <div id="screen-lobby" class="screen">
         <h1>Sala de Espera</h1>
         <p>Comparte este código con tus dos amigos:</p>
-        <div class="code-box" id="room-code-display">Generando código...</div>
+        <div class="code-box" id="room-code-display">Generando código seguro...</div>
         
         <p>Jugadores (<span id="player-count">1</span>/3):</p>
         <div class="player-list" id="lobby-players"></div>
         
         <div id="admin-controls" style="display: none;">
-            <button id="start-btn" onclick="startGame()" disabled>Empezar Juego (Faltan jugadores)</button>
+            <button id="start-btn" onclick="startGame()" disabled>Faltan jugadores</button>
         </div>
         <div id="player-wait-msg">
             <p>Esperando a que Angel inicie la partida...</p>
@@ -142,6 +142,14 @@
     let isAdmin = false;
     let listaJugadores = [];
 
+    // Opciones de conexión segura para evitar bloqueos del navegador en HTTPS
+    const peerConfig = {
+        host: '0.peerjs.com',
+        port: 443,
+        secure: true,
+        pingInterval: 3000
+    };
+
     // 1. EL ADMIN CREA LA SALA
     function initAsAdmin() {
         const name = document.getElementById('username').value.trim();
@@ -152,12 +160,18 @@
         isAdmin = true;
         listaJugadores = [currentUser];
 
-        peer = new Peer();
+        // Forzamos la configuración SSL segura aquí
+        peer = new Peer(peerConfig);
         
         peer.on('open', (id) => {
             document.getElementById('room-code-display').innerText = id;
             showScreen('screen-lobby');
             updateLobbyUI();
+        });
+
+        peer.on('error', (err) => {
+            console.error(err);
+            alert("Error crítico de red: " + err.type + ". Prueba a refrescar.");
         });
 
         peer.on('connection', (conn) => {
@@ -170,7 +184,6 @@
 
             conn.on('data', (data) => {
                 if (data.type === 'join') {
-                    // Guardamos el nombre en la propia conexión para saber luego de quién era
                     conn.peerUserName = data.name; 
                     listaJugadores.push(data.name);
                     updateLobbyUI();
@@ -178,17 +191,14 @@
                 }
             });
 
-            // Detectar cuando un amigo cierra la pestaña o se desconecta
             conn.on('close', () => {
                 connections = connections.filter(c => c !== conn);
                 if (conn.peerUserName) {
-                    // Lo borramos de la lista de nombres
                     listaJugadores = listaJugadores.filter(p => p !== conn.peerUserName);
                 }
                 updateLobbyUI();
                 broadcast({ type: 'update', players: listaJugadores });
                 
-                // Si estábamos jugando y alguien se va, reiniciamos al lobby automáticamente
                 if (document.getElementById('screen-game').classList.contains('active')) {
                     alert("Un jugador abandonó la partida. Volviendo al lobby.");
                     resetGame();
@@ -209,10 +219,11 @@
         currentUser = name;
         isAdmin = false;
 
-        peer = new Peer();
+        // Forzamos la configuración SSL segura aquí también
+        peer = new Peer(peerConfig);
 
         peer.on('open', () => {
-            connToAdmin = peer.connect(code);
+            connToAdmin = peer.connect(code, { reliable: true });
 
             connToAdmin.on('open', () => {
                 connToAdmin.send({ type: 'join', name: currentUser });
@@ -234,6 +245,11 @@
                 alert("La sala se ha cerrado. Volviendo al inicio.");
                 location.reload(); 
             });
+        });
+
+        peer.on('error', (err) => {
+            console.error(err);
+            alert("No se pudo conectar con la sala. Verifica que el código sea correcto.");
         });
     }
 
