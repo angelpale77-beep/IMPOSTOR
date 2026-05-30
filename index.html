@@ -1,1 +1,282 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Juego del Impostor</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: #1a1a2e;
+            color: #ffffff;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+            margin: 0;
+        }
+        .container {
+            background-color: #162447;
+            padding: 30px;
+            border-radius: 15px;
+            box-shadow: 0 8px 24px rgba(0,0,0,0.3);
+            text-align: center;
+            width: 90%;
+            max-width: 450px;
+        }
+        h1 { color: #e43f5a; margin-top: 0; }
+        input, button {
+            width: 100%;
+            padding: 12px;
+            margin: 10px 0;
+            border-radius: 8px;
+            border: none;
+            font-size: 16px;
+            box-sizing: border-box;
+        }
+        input { background-color: #fff; color: #333; }
+        button {
+            background-color: #e43f5a;
+            color: white;
+            font-weight: bold;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+        button:hover { background-color: #ff4b6b; }
+        button:disabled { background-color: #555; cursor: not-allowed; }
+        .screen { display: none; }
+        .active { display: block; }
+        .player-list {
+            text-align: left;
+            background: #1f4068;
+            padding: 10px;
+            border-radius: 8px;
+            margin: 15px 0;
+        }
+        .role-box {
+            font-size: 24px;
+            font-weight: bold;
+            margin: 20px 0;
+            padding: 20px;
+            border-radius: 8px;
+        }
+        .impostor { background-color: #8b0000; color: #ff4c4c; }
+        .civil { background-color: #006400; color: #4cd137; }
+        .admin-badge {
+            color: #f1c40f;
+            font-size: 12px;
+            font-weight: bold;
+            border: 1px solid #f1c40f;
+            padding: 2px 6px;
+            border-radius: 4px;
+            margin-left: 5px;
+        }
+    </style>
+</head>
+<body>
 
+<div class="container">
+    <div id="screen-login" class="screen active">
+        <h1>El Impostor</h1>
+        <p>Introduce tu nombre para entrar a la sala unicelular:</p>
+        <input type="text" id="username" placeholder="Tu nombre...">
+        <button onclick="joinRoom()">Entrar a la Sala</button>
+    </div>
+
+    <div id="screen-lobby" class="screen">
+        <h1>Sala de Espera</h1>
+        <p>Jugadores en la sala (<span id="player-count">0</span>/3):</p>
+        <div class="player-list" id="lobby-players"></div>
+        
+        <div id="admin-controls" style="display: none;">
+            <p style="color: #f1c40f;">✨ Tienes el control de Administrador</p>
+            <button id="start-btn" onclick="startGame()" disabled>Empezar Juego (Necesitas 3 jugadores)</button>
+        </div>
+        <div id="player-wait-msg">
+            <p>Esperando a que el Admin inicie la partida...</p>
+        </div>
+    </div>
+
+    <div id="screen-game" class="screen">
+        <h1>¡Partida Iniciada!</h1>
+        <p>Tu identidad secreta es:</p>
+        
+        <div id="role-display"></div>
+        
+        <div id="admin-reset-control" style="display: none;">
+            <hr style="border-color: #1f4068; margin: 20px 0;">
+            <button onclick="resetGame()" style="background-color: #1f4068;">Parar Juego (Reiniciar)</button>
+        </div>
+    </div>
+</div>
+
+<script>
+    // Palabras aleatorias para los civiles
+    const palabras = ["Manzana", "Televisor", "Coche", "Computadora", "Fútbol", "Perro", "Playa", "Pizza", "Minecraft", "Libro"];
+    
+    // Simulación de Base de Datos en LocalStorage para que funcione entre pestañas
+    function getGameState() {
+        let state = localStorage.getItem('impostor_game_state');
+        if (!state) {
+            state = { players: [], status: 'lobby', impostor: '', palabra: '' };
+            saveGameState(state);
+        } else {
+            state = JSON.parse(state);
+        }
+        return state;
+    }
+
+    function saveGameState(state) {
+        localStorage.setItem('impostor_game_state', JSON.stringify(state));
+    }
+
+    let currentUser = "";
+
+    // Unirse a la sala
+    function joinRoom() {
+        const input = document.getElementById('username');
+        let name = input.value.trim();
+        if (!name) return alert("Por favor, escribe un nombre.");
+        
+        let state = getGameState();
+
+        // Evitar que entren más de 3
+        if (state.players.length >= 3 && !state.players.includes(name)) {
+            return alert("La sala está llena (máximo 3 jugadores).");
+        }
+
+        currentUser = name;
+        
+        if (!state.players.includes(currentUser)) {
+            state.players.push(currentUser);
+            saveGameState(state);
+        }
+
+        showScreen('screen-lobby');
+        updateLobby();
+    }
+
+    // Actualizar la interfaz del Lobby
+    function updateLobby() {
+        let state = getGameState();
+        
+        // Si el juego ya empezó por el admin, redirigir a la pantalla de juego
+        if (state.status === 'playing') {
+            goToGameScreen(state);
+            return;
+        }
+
+        document.getElementById('player-count').innerText = state.players.length;
+        
+        const listDiv = document.getElementById('lobby-players');
+        listDiv.innerHTML = "";
+        
+        state.players.forEach(p => {
+            let item = document.createElement('div');
+            item.style.margin = "5px 0";
+            // Si el nombre es "angel" (no importa mayúsculas), le damos la etiqueta Admin
+            if (p.toLowerCase() === 'angel') {
+                item.innerHTML = `• ${p} <span class="admin-badge">ADMIN</span>`;
+            } else {
+                item.innerText = `• ${p}`;
+            }
+            listDiv.appendChild(item);
+        });
+
+        // Verificar si el usuario actual es Angel para mostrar controles de Admin
+        if (currentUser.toLowerCase() === 'angel') {
+            document.getElementById('admin-controls').style.display = 'block';
+            document.getElementById('player-wait-msg').style.display = 'none';
+            
+            // Habilitar botón solo si hay exactamente 3 jugadores
+            document.getElementById('start-btn').disabled = state.players.length !== 3;
+        } else {
+            document.getElementById('admin-controls').style.display = 'none';
+            document.getElementById('player-wait-msg').style.display = 'block';
+        }
+    }
+
+    // Iniciar el Juego (Solo Admin)
+    function startGame() {
+        let state = getGameState();
+        if (state.players.length !== 3) return;
+
+        state.status = 'playing';
+        // Elegir impostor al azar entre los 3
+        const randomIndex = Math.floor(Math.random() * 3);
+        state.impostor = state.players[randomIndex];
+        // Elegir palabra al azar
+        state.palabra = palabras[Math.floor(Math.random() * palabras.length)];
+
+        saveGameState(state);
+    }
+
+    // Mostrar roles en la pantalla de juego
+    function goToGameScreen(state) {
+        showScreen('screen-game');
+        const display = document.getElementById('role-display');
+        
+        if (currentUser === state.impostor) {
+            display.innerHTML = `
+                <div class="role-box impostor">ERES EL IMPOSTOR 🤫</div>
+                <p>No tienes palabra. ¡Intenta camuflarte entre los civiles sin que te descubran!</p>
+            `;
+        } else {
+            display.innerHTML = `
+                <div class="role-box civil">ERES CIVIL 👥</div>
+                <p>Tu palabra secreta es: <strong style="font-size: 20px; color: #4cd137;">${state.palabra}</strong></p>
+                <p>Describe tu palabra sin decirla directamente para pillar al impostor.</p>
+            `;
+        }
+
+        // Mostrar u ocultar el botón de parar juego si eres Angel
+        if (currentUser.toLowerCase() === 'angel') {
+            document.getElementById('admin-reset-control').style.display = 'block';
+        } else {
+            document.getElementById('admin-reset-control').style.display = 'none';
+        }
+    }
+
+    // Parar y Reiniciar Juego (Solo Admin)
+    function resetGame() {
+        let state = getGameState();
+        state.status = 'lobby';
+        state.impostor = '';
+        state.palabra = '';
+        saveGameState(state);
+    }
+
+    // Cambiar de pantalla visualmente
+    function showScreen(screenId) {
+        document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
+        document.getElementById(screenId).classList.add('active');
+    }
+
+    // Bucle de sincronización para que todas las pestañas se enteren de los cambios en tiempo real
+    setInterval(() => {
+        let state = getGameState();
+        
+        // Si estamos en la pantalla de login, no hacemos nada automático
+        if (document.getElementById('screen-login').classList.contains('active')) return;
+
+        if (state.status === 'lobby') {
+            if (document.getElementById('screen-game').classList.contains('active')) {
+                // Si el juego se reinició, volvemos al lobby
+                showScreen('screen-lobby');
+            }
+            updateLobby();
+        } else if (state.status === 'playing') {
+            if (document.getElementById('screen-lobby').classList.contains('active')) {
+                goToGameScreen(state);
+            }
+        }
+    }, 1000); // Se actualiza cada 1 segundo
+
+    // Limpiar base de datos al cerrar/recargar si se quiere empezar de cero absoluto
+    // Descomentar la línea de abajo si quieres resetear la sala al refrescar la página de todos
+    // localStorage.clear();
+</script>
+
+</body>
+</html>
